@@ -1,33 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
-    </queries>
 
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Needed to look up the UIDs of Realm VC and Minecraft for per-app audio capture. -->
+    <queries>
+        <package android:name="com.realmvc.app" />
+        <package android:name="com.mojang.minecraftpe" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="video/*" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
-        android:label="Realm Recorder"
-        android:theme="@style/AppTheme">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.RealmRecorder">
+
         <activity
-            android:name=".MainActivity"
-            android:exported="true">
+            android:name=".SplashActivity"
+            android:exported="true"
+            android:theme="@style/Theme.RealmRecorder.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden" />
+
+        <activity
+            android:name=".ProjectionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="com.realmvc.recorder.projection"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode"
+            android:theme="@style/Theme.RealmRecorder.Transparent" />
+
         <service
-            android:name=".ScreenRecorderService"
+            android:name=".RecorderService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|microphone" />
+
+        <service
+            android:name=".FloatingBallService"
+            android:exported="false" />
+
+        <receiver
+            android:name=".ExitReceiver"
+            android:exported="false" />
     </application>
 </manifest>

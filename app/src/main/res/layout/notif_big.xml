@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:background="@drawable/notif_bg" android:padding="8dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingBottom="6dp">
+        <TextView android:id="@+id/status" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:text="Ready to record" android:textColor="#FFFFFFFF"
+            android:textSize="14sp" android:textStyle="bold"/>
+        <Chronometer android:id="@+id/chrono" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="#FFFF4FA8" android:textSize="14sp" android:textStyle="bold" android:visibility="gone"/>
+    </LinearLayout>
+    <TextView android:id="@+id/sub" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:paddingStart="6dp" android:paddingEnd="6dp" android:paddingBottom="6dp"
+        android:text="Screen + the voices" android:textColor="#FFB9A6C9" android:textSize="12sp" android:maxLines="1"/>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:gravity="center_vertical">
+        <LinearLayout android:id="@+id/btnRec" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+            android:paddingTop="4dp" android:paddingBottom="4dp">
+            <ImageView android:id="@+id/icRec" android:layout_width="24dp" android:layout_height="24dp"
+                android:src="@drawable/ic_rec" android:tint="#FFFF1F7A" android:contentDescription="Record"/>
+            <TextView android:id="@+id/txtRec" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Record" android:textColor="#FFFFFFFF" android:textSize="10sp" android:maxLines="1"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnShot" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+            android:paddingTop="4dp" android:paddingBottom="4dp">
+            <ImageView android:id="@+id/icShot" android:layout_width="24dp" android:layout_height="24dp"
+                android:src="@drawable/ic_shot" android:tint="#FFFF4FA8" android:contentDescription="Screenshot"/>
+            <TextView android:id="@+id/txtShot" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Screenshot" android:textColor="#FFFFFFFF" android:textSize="10sp" android:maxLines="1"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnTools" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+            android:paddingTop="4dp" android:paddingBottom="4dp">
+            <ImageView android:id="@+id/icTools" android:layout_width="24dp" android:layout_height="24dp"
+                android:src="@drawable/ic_tools" android:tint="#FFFF4FA8" android:contentDescription="Tools"/>
+            <TextView android:id="@+id/txtTools" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Tools" android:textColor="#FFFFFFFF" android:textSize="10sp" android:maxLines="1"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnHome" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+            android:paddingTop="4dp" android:paddingBottom="4dp">
+            <ImageView android:id="@+id/icHome" android:layout_width="24dp" android:layout_height="24dp"
+                android:src="@drawable/ic_home" android:tint="#FFFF4FA8" android:contentDescription="Home"/>
+            <TextView android:id="@+id/txtHome" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Home" android:textColor="#FFFFFFFF" android:textSize="10sp" android:maxLines="1"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnExit" android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_weight="1" android:orientation="vertical" android:gravity="center"
+            android:paddingTop="4dp" android:paddingBottom="4dp">
+            <ImageView android:id="@+id/icExit" android:layout_width="24dp" android:layout_height="24dp"
+                android:src="@drawable/ic_exit" android:tint="#FFFF4FA8" android:contentDescription="Exit"/>
+            <TextView android:id="@+id/txtExit" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Exit" android:textColor="#FFFFFFFF" android:textSize="10sp" android:maxLines="1"/>
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

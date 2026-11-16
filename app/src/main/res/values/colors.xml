@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="rv_bg">#07040A</color>
+    <color name="rv_surface">#140A1C</color>
+    <color name="rv_surface2">#1E1029</color>
+    <color name="rv_stroke">#33204A</color>
+    <color name="rv_pink">#FF4FA8</color>
+    <color name="rv_hot">#FF1F7A</color>
+    <color name="rv_lavender">#D9B8FF</color>
+    <color name="rv_purple">#9B5CFF</color>
+    <color name="rv_text">#FFFFFF</color>
+    <color name="rv_muted">#B9A6C9</color>
+</resources>

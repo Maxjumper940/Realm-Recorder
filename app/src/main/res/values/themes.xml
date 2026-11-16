@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RealmRecorder" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/rv_bg</item>
+        <item name="android:colorPrimary">@color/rv_pink</item>
+        <item name="android:colorPrimaryDark">@color/rv_bg</item>
+        <item name="android:colorAccent">@color/rv_pink</item>
+        <item name="android:statusBarColor">@color/rv_bg</item>
+        <item name="android:navigationBarColor">@color/rv_bg</item>
+        <item name="android:textColorPrimary">@color/rv_text</item>
+        <item name="android:textColorSecondary">@color/rv_muted</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Theme.RealmRecorder.Splash">
+        <item name="android:windowBackground">@color/rv_bg</item>
+    </style>
+
+    <style name="Theme.RealmRecorder.Transparent" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorAccent">@color/rv_pink</item>
+    </style>
+</resources>

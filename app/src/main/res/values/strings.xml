@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Realm Recorder</string>
+    <string name="tagline">Screen + the voices</string>
+    <string name="channel_recording">Recording controls</string>
+    <string name="channel_toolbar">Recorder toolbar</string>
+</resources>
