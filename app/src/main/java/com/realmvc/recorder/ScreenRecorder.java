@@ -8,8 +8,10 @@ import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioPlaybackCaptureConfiguration;
 import android.media.AudioRecord;
+import android.media.AudioRecordingConfiguration;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.MediaCodec;
@@ -18,13 +20,16 @@ import android.media.MediaFormat;
 import android.media.MediaRecorder;
 import android.media.projection.MediaProjection;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import android.view.Surface;
 
 import java.nio.ByteBuffer;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -32,6 +37,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * VirtualDisplay -> H.264 (MediaCodec surface input) and
  * AudioPlaybackCapture and/or microphone PCM -> mixed -> AAC, muxed with MediaMuxer.
  * All timestamps share one System.nanoTime() base so audio and video stay in sync.
+ *
+ * The microphone is opened even when Realm VC or Minecraft is already capturing.
+ * Android silences that second capture instead of rejecting it; we watch
+ * {@code isClientSilenced()} and tell the user when their voice cannot be shared.
  */
 final class ScreenRecorder {
     private static final String TAG = "RealmRec.Engine";
@@ -75,6 +84,27 @@ final class ScreenRecorder {
     private volatile boolean videoEosSent;
     private long baseUs;
 
+    private Handler mainHandler;
+    private AudioManager.AudioRecordingCallback micCallback;
+    private boolean micCallbackRegistered;
+    private volatile boolean micWasBlocked;
+    private int silencePolls;
+    private final Runnable silencePoll = new Runnable() {
+        @Override public void run() {
+            AudioRecord mic = micRec;
+            if (mic == null || stopping.get()) return;
+            try {
+                AudioRecordingConfiguration c = mic.getActiveRecordingConfiguration();
+                if (c != null) publishSilence(c.isClientSilenced());
+            } catch (RuntimeException e) {
+                Log.w(TAG, "mic silence check", e);
+            }
+            if (++silencePolls < 5 && micRec != null && !stopping.get() && mainHandler != null) {
+                mainHandler.postDelayed(this, 400);
+            }
+        }
+    };
+
     ScreenRecorder(Context ctx, MediaProjection projection, Config cfg, Listener listener) {
         this.ctx = ctx.getApplicationContext();
         this.projection = projection;
@@ -110,18 +140,18 @@ final class ScreenRecorder {
                 listener.onNotice("Internal audio isn't available on this phone; recording without it.");
             }
         }
-        if (cfg.micAudio && micBusy()) {
-            // Only one ordinary app can use the mic at a time. Taking it would mute the user in
-            // their Realm VC call, so leave it alone and record app audio only.
-            listener.onNotice("Another app (like your Realm VC call) is using the mic, so your own voice isn't recorded. "
-                    + "App audio is still recorded.");
-        } else if (cfg.micAudio) {
+        // Always open the mic when the user asked for it. Another app holding it (Realm VC,
+        // Minecraft voice chat) used to make us skip the track entirely, so the voice was
+        // missing from in-game recordings. Android 10+ starts the second capture and silences
+        // it when the call will not share; that case is reported from the silence watch below.
+        // Per-app UID filtering applies only to playback capture, never to this mic.
+        if (MicShare.shouldOpenMic(cfg.micAudio)) {
             try {
                 micRec = buildMic();
             } catch (Exception e) {
                 Log.w(TAG, "mic unavailable", e);
                 micRec = null;
-                listener.onNotice("Microphone is busy or blocked; recording without it.");
+                listener.onNotice(MicShare.MIC_UNAVAILABLE);
             }
         }
         wantAudio = wantAudio && (internalRec != null || micRec != null);
@@ -160,31 +190,92 @@ final class ScreenRecorder {
         videoThread.start();
         if (wantAudio) {
             internalRec = startOrDrop(internalRec);
-            micRec = startOrDrop(micRec);
+            if (micRec != null) {
+                micRec = startMic(micRec);
+                if (micRec == null) listener.onNotice(MicShare.MIC_UNAVAILABLE);
+            }
             if (internalRec == null && micRec == null) {
                 listener.onNotice("Android wouldn't start audio capture; recording video only.");
                 sink.dropAudio();
             } else {
+                if (micRec != null) scheduleSilenceWatch();
                 audioThread = new Thread(this::audioLoop, "RealmRec-audio");
                 audioThread.start();
             }
         }
     }
 
-    private boolean micBusy() {
+    /**
+     * Register the recording callback before {@code startRecording}, as Android requires,
+     * so the initial silence state is not missed.
+     */
+    private AudioRecord startMic(AudioRecord r) {
+        ensureMainHandler();
+        ensureMicCallback();
         try {
-            android.media.AudioManager am = ctx.getSystemService(android.media.AudioManager.class);
-            if (am == null) return false;
-            for (android.media.AudioRecordingConfiguration c : am.getActiveRecordingConfigurations()) {
-                int src = c.getClientAudioSource();
-                // Ignore always-on hotword listeners (1999 = HOTWORD) and other apps' playback capture.
-                if (src == 1999 || src == MediaRecorder.AudioSource.REMOTE_SUBMIX) continue;
-                return true;
-            }
-            return false;
+            r.registerAudioRecordingCallback(mainHandler::post, micCallback);
+            micCallbackRegistered = true;
+            r.startRecording();
+            return r;
         } catch (RuntimeException e) {
-            return false;
+            Log.w(TAG, "startRecording failed", e);
+            unregisterMicCallback(r);
+            try { r.release(); } catch (RuntimeException ignored) {}
+            return null;
         }
+    }
+
+    private void ensureMainHandler() {
+        if (mainHandler == null) mainHandler = new Handler(Looper.getMainLooper());
+    }
+
+    private void ensureMicCallback() {
+        if (micCallback != null) return;
+        micCallback = new AudioManager.AudioRecordingCallback() {
+            @Override public void onRecordingConfigChanged(List<AudioRecordingConfiguration> configs) {
+                AudioRecord mic = micRec;
+                if (mic == null || stopping.get()) return;
+                int session = mic.getAudioSessionId();
+                for (AudioRecordingConfiguration c : configs) {
+                    if (c.getClientAudioSessionId() == session) {
+                        publishSilence(c.isClientSilenced());
+                        return;
+                    }
+                }
+            }
+        };
+    }
+
+    private void scheduleSilenceWatch() {
+        ensureMainHandler();
+        silencePolls = 0;
+        mainHandler.post(silencePoll);
+    }
+
+    private void publishSilence(boolean silenced) {
+        if (stopping.get()) return;
+        AudioRecord mic = micRec;
+        if (mic == null) return;
+        try {
+            if (mic.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) return;
+        } catch (RuntimeException e) {
+            return;
+        }
+        boolean gameAudio = internalRec != null;
+        String msg = MicShare.messageForTransition(silenced, micWasBlocked, gameAudio);
+        micWasBlocked = silenced;
+        if (msg == null) return;
+        Log.i(TAG, silenced ? "mic silenced by concurrent-capture policy" : "mic receiving audio");
+        listener.onNotice(msg);
+    }
+
+    private void unregisterMicCallback(AudioRecord r) {
+        if (r != null && micCallbackRegistered && micCallback != null) {
+            try {
+                r.unregisterAudioRecordingCallback(micCallback);
+            } catch (RuntimeException ignored) {}
+        }
+        micCallbackRegistered = false;
     }
 
     private static AudioRecord startOrDrop(AudioRecord r) {
@@ -205,6 +296,8 @@ final class ScreenRecorder {
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
                 .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN);
+        // UID filter is playback-only. The user's voice is the separate mic track,
+        // so "Minecraft only" still records the microphone.
         if (cfg.matchUids != null) {
             for (int uid : cfg.matchUids) b.addMatchingUid(uid);
         }
@@ -228,17 +321,30 @@ final class ScreenRecorder {
 
     @SuppressLint("MissingPermission")
     private AudioRecord buildMic() {
+        MicShare.checkSources(
+                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.CAMCORDER,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.REMOTE_SUBMIX);
+        if (MicShare.OUR_SOURCE != MediaRecorder.AudioSource.MIC) {
+            throw new IllegalStateException("recorder mic source drifted");
+        }
         int min = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
         if (min <= 0) throw new IllegalStateException("mic format unsupported");
-        AudioRecord r = new AudioRecord.Builder()
+        // MIC, and explicitly not privacy-sensitive. VOICE_COMMUNICATION / CAMCORDER
+        // would win the concurrent-capture policy and silence Realm VC's call.
+        AudioRecord.Builder b = new AudioRecord.Builder()
                 .setAudioSource(MediaRecorder.AudioSource.MIC)
                 .setAudioFormat(new AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                         .setSampleRate(SAMPLE_RATE)
                         .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                         .build())
-                .setBufferSizeInBytes(Math.max(min, FRAMES_PER_CHUNK * 2) * 4)
-                .build();
+                .setBufferSizeInBytes(Math.max(min, FRAMES_PER_CHUNK * 2) * 4);
+        if (Build.VERSION.SDK_INT >= 30 && !MicShare.ourCaptureIsPrivate()) {
+            b.setPrivacySensitive(false);
+        }
+        AudioRecord r = b.build();
         if (r.getState() != AudioRecord.STATE_INITIALIZED) {
             r.release();
             throw new IllegalStateException("mic not initialized");
@@ -344,37 +450,60 @@ final class ScreenRecorder {
     // ------------------------------------------------------------------ audio
 
     private void audioLoop() {
-        final boolean mix = internalRec != null && micRec != null;
-        final short[] main = new short[FRAMES_PER_CHUNK * 2]; // stereo
-        final short[] mic = new short[FRAMES_PER_CHUNK];        // mono
+        // Each source is read blocking on its own thread. A non-blocking mic read
+        // beside the playback read dropped whatever samples were not already queued,
+        // so the voice never landed in the file. The queues apply backpressure
+        // instead of dropping, and the mixer waits until both chunks exist.
+        final PcmQueue internalQ = internalRec != null ? new PcmQueue(8) : null;
+        final PcmQueue micQ = micRec != null ? new PcmQueue(8) : null;
+        Thread internalReader = null;
+        Thread micReader = null;
+        if (internalQ != null) {
+            internalReader = new Thread(() -> readLoop(internalRec, internalQ, FRAMES_PER_CHUNK * 2), "RealmRec-internal");
+            internalReader.start();
+        }
+        if (micQ != null) {
+            micReader = new Thread(() -> readLoop(micRec, micQ, FRAMES_PER_CHUNK), "RealmRec-mic");
+            micReader.start();
+        }
         final byte[] bytes = new byte[FRAMES_PER_CHUNK * 4];
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         long frames = 0;
         long startUs = -1;
         boolean formatSeen = false;
+        boolean micDead = micQ == null;
         try {
             while (!stopping.get()) {
-                if (internalRec != null) {
-                    int n = readFully(internalRec, main, main.length);
-                    if (n < 0) throw new IllegalStateException("internal read " + n);
-                    if (n < main.length) java.util.Arrays.fill(main, n, main.length, (short) 0);
-                    if (mix) {
-                        int m = micRec.read(mic, 0, mic.length, AudioRecord.READ_NON_BLOCKING);
-                        for (int i = 0; i < Math.max(0, m); i++) {
-                            int l = main[2 * i] + mic[i];
-                            int r = main[2 * i + 1] + mic[i];
-                            main[2 * i] = clamp(l);
-                            main[2 * i + 1] = clamp(r);
+                short[] stereo = null;
+                if (internalQ != null) {
+                    stereo = takeChunk(internalQ);
+                    if (stereo == null) {
+                        if (!stopping.get()) {
+                            listener.onNotice("Audio stopped; the rest of the video will be silent.");
                         }
+                        break;
                     }
-                } else {
-                    int m = readFully(micRec, mic, mic.length);
-                    if (m < 0) throw new IllegalStateException("mic read " + m);
-                    for (int i = 0; i < FRAMES_PER_CHUNK; i++) {
-                        short s = i < m ? mic[i] : 0;
-                        main[2 * i] = s;
-                        main[2 * i + 1] = s;
+                }
+                short[] mic = null;
+                if (!micDead) {
+                    mic = takeChunk(micQ);
+                    if (mic == null) {
+                        if (stopping.get()) break;
+                        micDead = true;
+                        if (!micWasBlocked) listener.onNotice(MicShare.MIC_DROPPED);
+                        if (stereo == null) break;
                     }
+                }
+                if (stereo == null) {
+                    stereo = new short[FRAMES_PER_CHUNK * 2];
+                    AudioMix.monoToStereo(stereo, mic);
+                } else if (mic != null) {
+                    AudioMix.mixMicIntoStereo(stereo, mic, mic.length);
+                }
+                if (stereo.length != FRAMES_PER_CHUNK * 2) {
+                    short[] padded = new short[FRAMES_PER_CHUNK * 2];
+                    System.arraycopy(stereo, 0, padded, 0, Math.min(stereo.length, padded.length));
+                    stereo = padded;
                 }
                 if (stopping.get()) break;
                 if (startUs < 0) {
@@ -382,9 +511,9 @@ final class ScreenRecorder {
                     startUs = System.nanoTime() / 1000 - baseUs - (FRAMES_PER_CHUNK * 1_000_000L / SAMPLE_RATE);
                     if (startUs < 0) startUs = 0;
                 }
-                for (int i = 0; i < main.length; i++) {
-                    bytes[2 * i] = (byte) (main[i] & 0xff);
-                    bytes[2 * i + 1] = (byte) ((main[i] >> 8) & 0xff);
+                for (int i = 0; i < stereo.length; i++) {
+                    bytes[2 * i] = (byte) (stereo[i] & 0xff);
+                    bytes[2 * i + 1] = (byte) ((stereo[i] >> 8) & 0xff);
                 }
                 long pts = startUs + frames * 1_000_000L / SAMPLE_RATE;
                 frames += FRAMES_PER_CHUNK;
@@ -398,7 +527,48 @@ final class ScreenRecorder {
             Log.e(TAG, "audio loop", e);
             if (!stopping.get()) listener.onNotice("Audio stopped; the rest of the video will be silent.");
         } finally {
+            if (internalQ != null) internalQ.close();
+            if (micQ != null) micQ.close();
+            // Unblock the reader threads. stop() does this too; a second stop is ignored.
+            stopRec(internalRec);
+            stopRec(micRec);
+            join(internalReader);
+            join(micReader);
             if (!formatSeen) sink.dropAudio();
+        }
+    }
+
+    /** Blocking read into full chunks. Closes the queue when the capture ends or fails. */
+    private void readLoop(AudioRecord rec, PcmQueue q, int shortsPerChunk) {
+        short[] buf = new short[shortsPerChunk];
+        try {
+            while (!stopping.get() && !q.isClosed()) {
+                int n = readFully(rec, buf, buf.length);
+                if (n <= 0) break;
+                if (n < buf.length) java.util.Arrays.fill(buf, n, buf.length, (short) 0);
+                q.put(java.util.Arrays.copyOf(buf, buf.length));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "audio read failed", e);
+        } finally {
+            q.close();
+        }
+    }
+
+    /** Waits until one chunk is available, the capture closes, or recording is stopping. */
+    private short[] takeChunk(PcmQueue q) {
+        try {
+            while (!stopping.get()) {
+                short[] got = q.poll(200);
+                if (got != null) return got;
+                if (q.isClosed() && q.isEmpty()) return null;
+            }
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
         }
     }
 
@@ -411,12 +581,6 @@ final class ScreenRecorder {
             off += n;
         }
         return off;
-    }
-
-    private static short clamp(int v) {
-        if (v > Short.MAX_VALUE) return Short.MAX_VALUE;
-        if (v < Short.MIN_VALUE) return Short.MIN_VALUE;
-        return (short) v;
     }
 
     private void queueAudio(byte[] data, int len, long pts, int flags) {
@@ -587,8 +751,13 @@ final class ScreenRecorder {
             try { audioCodec.release(); } catch (RuntimeException ignored) {}
             audioCodec = null;
         }
+        if (mainHandler != null) mainHandler.removeCallbacks(silencePoll);
         if (internalRec != null) { try { internalRec.release(); } catch (RuntimeException ignored) {} internalRec = null; }
-        if (micRec != null) { try { micRec.release(); } catch (RuntimeException ignored) {} micRec = null; }
+        if (micRec != null) {
+            unregisterMicCallback(micRec);
+            try { micRec.release(); } catch (RuntimeException ignored) {}
+            micRec = null;
+        }
         if (sink != null && !stopping.get()) { sink.finish(); }
         if (outPfd != null) { try { outPfd.close(); } catch (Exception ignored) {} outPfd = null; }
         if (shotThread != null) { shotThread.quitSafely(); shotThread = null; }

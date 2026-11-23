@@ -55,6 +55,8 @@ public class MainActivity extends Activity implements RecState.Listener {
     private RecordButton recordButton;
     private TextView recordTimer;
     private TextView recordHint;
+    private LinearLayout micBanner;
+    private TextView micBannerText;
     private TextView storagePill;
     private LinearLayout recentBox;
     private TextView ballTileValue;
@@ -249,6 +251,16 @@ public class MainActivity extends Activity implements RecState.Listener {
         recBox.addView(recordHint, Ui.lpMargins(this, -2, -2, 0, 2, 0, 0));
         col.addView(recBox, Ui.lpMargins(this, -1, -2, 0, 14, 0, 6));
 
+        micBanner = Ui.column(this);
+        micBanner.setBackground(Ui.round(0xFF2A1020, Ui.dp(this, 16), Ui.HOT, Ui.dp(this, 1)));
+        micBanner.setPadding(Ui.dp(this, 16), Ui.dp(this, 14), Ui.dp(this, 16), Ui.dp(this, 14));
+        micBanner.addView(Ui.text(this, "Microphone", 15, Ui.PINK, true));
+        micBannerText = Ui.text(this, "", 13, Ui.TEXT, false);
+        micBannerText.setLineSpacing(0, 1.2f);
+        micBanner.addView(micBannerText, Ui.lpMargins(this, -1, -2, 0, 4, 0, 0));
+        micBanner.setVisibility(View.GONE);
+        col.addView(micBanner, Ui.lpMargins(this, -1, -2, 0, 8, 0, 8));
+
         // Tool row.
         LinearLayout tools = Ui.row(this);
         tools.addView(tile(R.drawable.ic_shot, "Screenshot", "One tap", v -> openProjection(ProjectionActivity.MODE_SHOT), null),
@@ -273,8 +285,9 @@ public class MainActivity extends Activity implements RecState.Listener {
         TextView tipText = Ui.text(this,
                 "Android keeps normal call audio private. In Realm VC open Me and turn on Recording mode "
                         + "before you join, and wear headphones. Your friends' voices and the Minecraft sound then go "
-                        + "into the video. Android lets only one app use the mic, so during a call Realm Recorder leaves "
-                        + "it to Realm VC and your own voice isn't recorded.",
+                        + "into the video, and your microphone is mixed in on top \u2014 including while Realm VC is in the call. "
+                        + "If Android is holding the mic for that call and will not share it, Realm Recorder says so. "
+                        + "Leave the call, turn off Minecraft's voice chat, and record again to put your own voice in the video.",
                 13, Ui.MUTED, false);
         tipText.setLineSpacing(0, 1.15f);
         tip.addView(tipText, Ui.lpMargins(this, -1, -2, 0, 4, 0, 10));
@@ -346,7 +359,6 @@ public class MainActivity extends Activity implements RecState.Listener {
         if (qualityTileValue != null) {
             qualityTileValue.setText(Prefs.resolution(this) + "p " + Prefs.fps(this) + "fps\n" + Prefs.bitrateMbps(this) + " Mbps");
         }
-        if (recordHint != null) recordHint.setText(summary());
     }
 
     private static String shortTarget(String t) {
@@ -375,7 +387,18 @@ public class MainActivity extends Activity implements RecState.Listener {
         recordButton.setRecording(rec);
         recordTimer.setText(rec ? "\u25CF " + RecState.format(RecState.elapsedMs()) : "Tap to record");
         recordTimer.setTextColor(rec ? Ui.PINK : Ui.TEXT);
-        recordHint.setText(rec ? "Recording \u2014 stop here, from the shade or the floating ball" : summary());
+        String banner = RecState.banner();
+        if (micBanner != null && micBannerText != null) {
+            if (banner != null && !banner.isEmpty()) {
+                micBannerText.setText(banner);
+                micBanner.setVisibility(View.VISIBLE);
+            } else {
+                micBanner.setVisibility(View.GONE);
+            }
+        }
+        if (rec && banner != null) recordHint.setText("Recording \u2014 your voice is missing");
+        else recordHint.setText(rec ? "Recording \u2014 stop here, from the shade or the floating ball" : summary());
+        recordHint.setTextColor(rec && banner != null ? Ui.HOT : Ui.MUTED);
     }
 
     private void onRecordPressed() {
@@ -505,6 +528,7 @@ public class MainActivity extends Activity implements RecState.Listener {
 
     private void afterSettingChange() {
         refreshTileValues();
+        updateRecordUi();
         Notifs.showToolbar(this);
         if (tab == TAB_SETTINGS) showTab(TAB_SETTINGS);
     }
@@ -530,6 +554,7 @@ public class MainActivity extends Activity implements RecState.Listener {
         if (on) startBall();
         else stopService(new Intent(this, FloatingBallService.class));
         refreshTileValues();
+        updateRecordUi();
         if (tab == TAB_SETTINGS) showTab(TAB_SETTINGS);
         Toast.makeText(this, on ? "Floating ball on" : "Floating ball off", Toast.LENGTH_SHORT).show();
     }
@@ -761,8 +786,10 @@ public class MainActivity extends Activity implements RecState.Listener {
                         + "\u2022 Realm VC: turn on Recording mode in Realm VC (Me tab) before joining so the call voices "
                         + "play as media audio Android lets recorders capture. Use headphones.\n"
                         + "\u2022 Without Recording mode, Android hides call audio from every recorder.\n"
-                        + "\u2022 Only one app can use the mic at a time. If Realm VC (or another app) is already using it "
-                        + "when you press Record, Realm Recorder skips the mic so your call keeps working.\n"
+                        + "\u2022 Your microphone is recorded together with the game, including while Realm VC is using the mic. "
+                        + "If the call is in voice-communication mode, Android keeps the mic for the call and this recording "
+                        + "hears silence \u2014 you stay audible in the call, and Realm Recorder explains what to do. "
+                        + "Leave the call and turn off Minecraft voice chat, then record again, to get your own voice in the video.\n"
                         + "\u2022 Some apps block capture on purpose; Android always respects that.\n"
                         + "\u2022 Tell everyone in the call that you're recording.",
                 13, Ui.MUTED, false);

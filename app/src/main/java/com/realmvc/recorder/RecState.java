@@ -16,6 +16,8 @@ public final class RecState {
     private static volatile boolean recording;
     private static volatile long startedElapsed;
     private static volatile String lastMessage;
+    /** Stays on screen until the next recording starts or the mic starts working. */
+    private static volatile String banner;
 
     private RecState() {}
 
@@ -30,6 +32,9 @@ public final class RecState {
 
     public static String lastMessage() { return lastMessage; }
 
+    /** Why the microphone is missing, or null. Shown on the home screen. */
+    public static String banner() { return banner; }
+
     static void setRecording(boolean r) {
         recording = r;
         if (r) startedElapsed = SystemClock.elapsedRealtime();
@@ -38,6 +43,11 @@ public final class RecState {
 
     static void setMessage(String msg) {
         lastMessage = msg;
+        notifyListeners();
+    }
+
+    static void setBanner(String msg) {
+        banner = msg;
         notifyListeners();
     }
 

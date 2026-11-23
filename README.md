@@ -46,7 +46,7 @@ Android won't let any recorder capture voice-call ("communication") audio. Realm
 3. **Wear headphones.** With echo cancellation off, the others in the call would hear an echo if you use the speaker.
 4. In Realm Recorder, choose audio target **Realm VC** or **All**, and mode **Internal** or **Internal + Mic**.
 
-**Your own voice:** Android lets only one app use the microphone at a time. While Realm VC is using it for the call, Realm Recorder skips the mic, so you stay audible in the call. The recording has the other people's voices and the game audio, but not your voice.
+**Your own voice:** With Internal + Mic, your microphone is mixed into the same track as the game audio, including while Realm VC is already using the mic. Android still will not share the microphone when the call is in voice-communication mode (Realm VC's normal call, or Minecraft voice chat): the call keeps the mic, this recording receives silence, and you stay audible in the call. Realm Recorder then shows a message on the home screen and in the notification shade. To put your own voice in the video, leave the voice call, turn off Minecraft's voice chat, and start the recording again. To record everyone else, turn on Realm VC → Me → Recording mode and wear headphones.
 
 Minecraft game audio can be captured in Internal mode. Apps that opt out of capture, such as Chrome, are recorded silent. The recorder can't get around that.
 
