@@ -4,4 +4,5 @@
     <string name="tagline">Screen + the voices</string>
     <string name="channel_recording">Recording controls</string>
     <string name="channel_toolbar">Recorder toolbar</string>
+    <string name="channel_mic">Microphone blocked</string>
 </resources>

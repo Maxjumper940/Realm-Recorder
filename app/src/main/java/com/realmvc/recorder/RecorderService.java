@@ -54,6 +54,7 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
     private ScreenRecorder recorder;
     private boolean stopping;
     private boolean exitRequested;
+    private boolean micHeldByCall;
     private String detail = "";
 
     private MediaProjection shotProjection;  // one-off screenshot projection
@@ -143,6 +144,10 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
         int code = intent.getIntExtra(EXTRA_CODE, 0);
         Intent data = getDataExtra(intent);
 
+        RecState.setBanner(null);
+        micHeldByCall = false;
+        Notifs.hideMicBlocked(this);
+
         String mode = Prefs.audioMode(this);
         boolean micGranted = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
         boolean wantInternal = Prefs.audioUsesInternal(mode) && micGranted;
@@ -153,11 +158,15 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
 
         int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION;
         if ((wantInternal || wantMic) && Build.VERSION.SDK_INT >= 30) {
-            // Android 11+ needs the microphone type to keep capturing audio while another app is in front.
+            // Android 11+ needs the microphone foreground-service type, or the mic
+            // (and playback capture) is silenced while Minecraft is in front.
+            // The manifest declares mediaProjection|microphone and FOREGROUND_SERVICE_MICROPHONE.
             type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
         }
+        boolean micTypeRefused = false;
         Notification starting = Notifs.working(this, "Starting recording\u2026");
         if (!goForeground(starting, type)) {
+            if (wantMic) micTypeRefused = true;
             wantMic = false; // the microphone type was refused; internal capture may still work
             if (!goForeground(starting, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)) {
                 fail("Android didn't allow screen recording to start. Open Realm Recorder and try again.");
@@ -193,13 +202,20 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
             return;
         }
         recorder = r;
-        detail = Math.min(r.width(), r.height()) + "p \u00B7 " + cfg.fps + "fps \u00B7 "
-                + (cfg.internalAudio || cfg.micAudio ? Prefs.audioModeLabel(mode) : "No audio")
+        detail = Math.min(r.width(), r.height()) + "p \u00B7 " + cfg.fps + "fps \u00B7 " + audioLabel(cfg)
                 + (cfg.internalAudio ? " (" + Prefs.targetLabel(Prefs.audioTarget(this)) + ")" : "");
         RecState.setRecording(true);
         Notifs.hideToolbar(this);
         notifyRecording();
         toast("Recording started");
+        if (micTypeRefused) onNotice(MicShare.FGS_BLOCKED);
+    }
+
+    private static String audioLabel(ScreenRecorder.Config cfg) {
+        if (cfg.internalAudio && cfg.micAudio) return "Internal + Mic";
+        if (cfg.internalAudio) return "Internal audio";
+        if (cfg.micAudio) return "Microphone";
+        return "No audio";
     }
 
     @SuppressWarnings("deprecation")
@@ -271,7 +287,7 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
     private void notifyRecording() {
         NotificationManager nm = getSystemService(NotificationManager.class);
         try {
-            if (nm != null) nm.notify(Notifs.ID_RECORDING, Notifs.recording(this, detail));
+            if (nm != null) nm.notify(Notifs.ID_RECORDING, Notifs.recording(this, detail, micHeldByCall));
         } catch (SecurityException ignored) {}
     }
 
@@ -284,6 +300,8 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
         final ScreenRecorder r = recorder;
         recorder = null;
         stopping = true;
+        micHeldByCall = false;
+        Notifs.hideMicBlocked(this);
         RecState.setRecording(false);
         NotificationManager nm = getSystemService(NotificationManager.class);
         try {
@@ -464,8 +482,20 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
 
     @Override public void onNotice(String message) {
         main.post(() -> {
-            toast(message);
+            if (MicShare.RESUMED.equals(message)) {
+                micHeldByCall = false;
+                RecState.setBanner(null);
+                Notifs.hideMicBlocked(this);
+            } else if (MicShare.isBlocked(message)) {
+                micHeldByCall = true;
+                RecState.setBanner(message);
+                Notifs.showMicBlocked(this, message);
+            } else if (MicShare.explainsMissingVoice(message)) {
+                RecState.setBanner(message);
+            }
+            toast(MicShare.isBlocked(message) ? MicShare.TOAST : message);
             RecState.setMessage(message);
+            if (recorder != null) notifyRecording();
         });
     }
 
@@ -484,6 +514,8 @@ public class RecorderService extends Service implements ScreenRecorder.Listener 
             }, "RealmRec-final").start();
             RecState.setRecording(false);
         }
+        micHeldByCall = false;
+        Notifs.hideMicBlocked(this);
         releaseProjection();
         releaseShot();
         worker.shutdown();

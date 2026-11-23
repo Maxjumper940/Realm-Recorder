@@ -14,9 +14,11 @@ import android.widget.RemoteViews;
 final class Notifs {
     static final String CH_RECORDING = "recording";
     static final String CH_TOOLBAR = "toolbar";
+    static final String CH_MIC = "mic";
     static final int ID_RECORDING = 41;
     static final int ID_TOOLBAR = 42;
     static final int ID_SAVED = 43;
+    static final int ID_MIC = 44;
 
     private Notifs() {}
 
@@ -31,8 +33,12 @@ final class Notifs {
                 c.getString(R.string.channel_toolbar), NotificationManager.IMPORTANCE_LOW);
         bar.setShowBadge(false);
         bar.setSound(null, null);
+        NotificationChannel mic = new NotificationChannel(CH_MIC,
+                c.getString(R.string.channel_mic), NotificationManager.IMPORTANCE_HIGH);
+        mic.setShowBadge(false);
         nm.createNotificationChannel(rec);
         nm.createNotificationChannel(bar);
+        nm.createNotificationChannel(mic);
     }
 
     // --------------------------------------------------------------- intents
@@ -92,19 +98,29 @@ final class Notifs {
 
     /** Ongoing notification while recording (used by the foreground service). */
     static Notification recording(Context c, String detail) {
+        return recording(c, detail, false);
+    }
+
+    /**
+     * @param micBlocked when Android is holding the mic for a call, the shade says so
+     *                   even if the heads-up alert was dismissed.
+     */
+    static Notification recording(Context c, String detail, boolean micBlocked) {
         RemoteViews small = controls(c, R.layout.notif_small, true);
         RemoteViews big = controls(c, R.layout.notif_big, true);
         long base = RecState.startedElapsed();
-        big.setTextViewText(R.id.status, "\u25CF Recording");
+        String sub = micBlocked ? MicShare.ONGOING : detail;
+        big.setTextViewText(R.id.status, micBlocked ? "Voice not recording" : "\u25CF Recording");
+        big.setTextColor(R.id.status, micBlocked ? 0xFFFF4FA8 : 0xFFFFFFFF);
         big.setViewVisibility(R.id.chrono, View.VISIBLE);
         big.setChronometer(R.id.chrono, base, null, true);
-        big.setTextViewText(R.id.sub, detail);
+        big.setTextViewText(R.id.sub, sub);
         long wall = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - base);
         Notification.Builder b = new Notification.Builder(c, CH_RECORDING)
                 .setSmallIcon(R.drawable.ic_notif)
                 .setColor(0xFFFF4FA8)
-                .setContentTitle("Recording")
-                .setContentText(detail)
+                .setContentTitle(micBlocked ? "Your voice isn't in this recording" : "Recording")
+                .setContentText(sub)
                 .setSubText("Recording")
                 .setWhen(wall)
                 .setShowWhen(true)
@@ -174,6 +190,32 @@ final class Notifs {
     static void hideToolbar(Context c) {
         NotificationManager nm = c.getSystemService(NotificationManager.class);
         if (nm != null) nm.cancel(ID_TOOLBAR);
+    }
+
+    /** Heads-up while a call is holding the mic, so the explanation is visible over the game. */
+    static void showMicBlocked(Context c, String message) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm == null) return;
+        ensureChannels(c);
+        Notification n = new Notification.Builder(c, CH_MIC)
+                .setSmallIcon(R.drawable.ic_notif)
+                .setColor(0xFFFF4FA8)
+                .setContentTitle("Your voice isn't in this recording")
+                .setContentText("A call is holding the mic. Expand for what to do.")
+                .setStyle(new Notification.BigTextStyle().bigText(message))
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_ERROR)
+                .setContentIntent(openAppPi(c))
+                .build();
+        try {
+            nm.notify(ID_MIC, n);
+        } catch (SecurityException ignored) {}
+    }
+
+    static void hideMicBlocked(Context c) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(ID_MIC);
     }
 
     static void showSaved(Context c, android.net.Uri uri) {
